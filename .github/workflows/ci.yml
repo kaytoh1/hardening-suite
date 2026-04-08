@@ -1,0 +1,35 @@
+# Executa a suíte de testes num SO Linux real (runner ubuntu-latest).
+# Não aplica hardening nem altera serviços — apenas valida código e smoke em Linux.
+
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  test-linux:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Instalar pacote e dependências
+        run: pip install -e .
+
+      - name: Testes (unittest + smoke Linux)
+        run: python -m unittest discover -s tests -p "test_*.py" -v

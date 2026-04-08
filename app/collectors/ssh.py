@@ -13,8 +13,19 @@ def is_ssh_installed() -> bool:
 
 
 def is_ssh_running() -> bool:
-    result = run_command(["systemctl", "is-active", "ssh"])
-    return result.stdout == "active"
+    """True se o servidor SSH estiver ativo (systemd ssh/sshd, service, ou processo sshd)."""
+    for unit in ("ssh", "sshd"):
+        result = run_command(["systemctl", "is-active", unit], check=False, timeout=15)
+        if result.stdout.strip() == "active":
+            return True
+
+    svc = run_command(["service", "ssh", "status"], check=False, timeout=15)
+    out = (svc.stdout + svc.stderr).lower()
+    if "running" in out or "active (running)" in out:
+        return True
+
+    pg = run_command(["pgrep", "-x", "sshd"], check=False, timeout=10)
+    return pg.returncode == 0
 
 
 def ssh_config_exists() -> bool:

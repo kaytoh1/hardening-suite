@@ -26,3 +26,10 @@ def backup_file(path: Path) -> Path:
     shutil.copy2(path, backup_path)
 
     return backup_path
+
+
+def restore_file_from_backup(backup_path: Path, target: Path) -> None:
+    """Restaura target a partir de um backup criado por backup_file."""
+    if not backup_path.is_file():
+        raise FileNotFoundError(f"Backup não encontrado: {backup_path}")
+    shutil.copy2(backup_path, target)

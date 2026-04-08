@@ -1,3 +1,4 @@
+import os
 import subprocess
 
 from app.core.constants import DEFAULT_TIMEOUT
@@ -9,7 +10,9 @@ def run_command(
     command: list[str],
     timeout: int = DEFAULT_TIMEOUT,
     check: bool = False,
+    env: dict[str, str] | None = None,
 ) -> CommandResult:
+    run_env = {**os.environ, **(env or {})}
     try:
         completed = subprocess.run(
             command,
@@ -17,6 +20,7 @@ def run_command(
             text=True,
             timeout=timeout,
             check=False,
+            env=run_env,
         )
     except subprocess.TimeoutExpired as exc:
         raise CommandExecutionError(

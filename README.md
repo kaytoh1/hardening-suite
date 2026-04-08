@@ -1,263 +1,132 @@
-HEAD
-# hardening-suite
-Segurança linux
 # Hardening Suite
 
-## Descrição
-
-Hardening Suite é uma ferramenta de automação para hardening de sistemas Linux (Ubuntu/Debian), projetada para aplicar boas práticas de segurança de forma segura, modular e automatizada.
-
-A ferramenta executa configurações críticas de segurança incluindo SSH, firewall, proteção contra brute force, hardening do sistema, auditoria e verificação de integridade.
-
-O foco do projeto é evitar erros comuns de configuração, reduzir superfície de ataque e garantir que o acesso remoto não seja perdido durante o processo.
-
----
-
-## Objetivo
-
-Automatizar o hardening de um sistema Linux com:
-
-* Execução segura
-* Validação antes de aplicar mudanças
-* Proteção contra lockout de SSH
-* Estrutura modular e extensível
-
----
+Automação de hardening para Linux (Ubuntu/Debian), com foco em SSH, firewall, fail2ban, sistema e auditoria.
 
 ## Requisitos
 
-* Linux (Ubuntu/Debian recomendado)
-* Python 3.10 ou superior
-* Acesso root (sudo)
-* Conexão com internet
-
----
+* Linux (Ubuntu/Debian)
+* Python 3.10+
+* Privilégios elevados (`sudo`)
+* Rede para `apt`, quando aplicável
 
 ## Instalação
 
-### 1. Clonar ou acessar o projeto
-
 ```bash
-cd /mnt/c/Users/kaytoh/Desktop/hardening/hardening-suite
-```
-
-### 2. Criar ambiente virtual
-
-```bash
+cd hardening-suite
 python3 -m venv .venv
-```
-
-### 3. Ativar ambiente virtual
-
-```bash
 source .venv/bin/activate
+pip install -e .
 ```
 
-### 4. Instalar dependências
+Alternativa sem instalação em modo editável:
 
 ```bash
 pip install typer rich pydantic
 ```
 
----
-
-## Estrutura do Projeto
-
-```
-app/
-├── cli/            Interface de linha de comando
-├── core/           Constantes, modelos e exceções
-├── collectors/     Coleta de informações do sistema
-├── policies/       Regras de segurança
-├── remediators/    Execução das ações de hardening
-├── utils/          Funções auxiliares
-
-state/
-├── backups/        Backups automáticos
-├── reports/        Relatórios (futuro)
-├── runs/           Histórico de execução
-```
-
----
-
-## Como Executar
-
-Todos os comandos devem ser executados com privilégios elevados.
-
-### Executar comando geral
+## Execução
 
 ```bash
 sudo .venv/bin/python harden.py <comando>
 ```
 
----
+### Verificação de distribuição
 
-## Comandos Disponíveis
+Comandos de hardening (`harden-ssh`, `harden-network`, etc.) **só rodam** se `ID` em `/etc/os-release` for `ubuntu` ou `debian`. O comando `scan` não bloqueia.
 
-### 1. Hardening de SSH
-
-```bash
-sudo .venv/bin/python harden.py harden-ssh
-```
-
-O que faz:
-
-* Configura autenticação por chave SSH
-* Desativa login por senha
-* Desativa login root
-* Ajusta permissões de `.ssh`
-* Valida configuração antes de aplicar
-* Reinicia SSH com verificação de acesso
-
----
-
-### 2. Hardening de rede
+Para forçar em outra distro (não recomendado):
 
 ```bash
-sudo .venv/bin/python harden.py harden-network
+sudo .venv/bin/python harden.py --skip-distro-check harden-system
 ```
 
-O que faz:
+### Opções úteis
 
-* Instala e configura UFW
-* Bloqueia conexões de entrada por padrão
-* Libera acesso SSH
-* Instala e configura Fail2ban
+| Contexto | Opção | Efeito |
+|----------|--------|--------|
+| Rede | `--limit-ssh` | `ufw limit` nas portas TCP do SSH |
+| Rede | `--ensure-ipv6` / `--no-ensure-ipv6` | Ajusta `IPV6=yes` ou `no` em `/etc/default/ufw` antes das regras |
+| SSH | `--public-key-file PATH` | Lê a chave pública do arquivo (não interativo) |
+| SSH | `--ensure-ssh` | Instala `openssh-server` (apt) e tenta iniciar o serviço se não estiver pronto (WSL/labs) |
 
----
-
-### 3. Hardening de sistema
+Exemplos:
 
 ```bash
-sudo .venv/bin/python harden.py harden-system
+sudo .venv/bin/python harden.py harden-network --limit-ssh
+sudo .venv/bin/python harden.py harden-network --no-ensure-ipv6
+sudo .venv/bin/python harden.py harden-ssh --public-key-file /root/my_key.pub
+sudo .venv/bin/python harden.py harden-ssh --ensure-ssh
 ```
 
-O que faz:
+### Códigos de saída (CLI)
 
-* Atualiza pacotes do sistema
-* Ativa atualizações automáticas
-* Instala ferramentas de segurança
-* Remove dependências desnecessárias
+| Código | Significado |
+|--------|-------------|
+| 0 | Sucesso |
+| 1 | Falha geral / comando |
+| 2 | Validação |
+| 3 | Rollback / operação revertida |
+| 4 | Backup / restauração |
+| 5 | Distribuição não suportada |
 
----
+## Comandos
 
-### 4. Hardening avançado
+* `scan` — informações do sistema
+* `harden-ssh` — chave pública, `sshd_config` (só seção **global**, antes do primeiro `Match`), teste e rollback
+* `harden-network` — UFW (portas do `sshd_config`, IPv4/IPv6 conforme UFW) + fail2ban (`port` alinhado ao SSH)
+* `harden-system` — atualizações e ferramentas básicas
+* `harden-advanced` — serviços, modprobe, permissões, sudo via `sudoers.d` + `visudo`
+* `harden-audit` — auditd, rkhunter, AIDE
+
+Ordem sugerida: `harden-ssh` → `harden-network` → `harden-system` → `harden-advanced` → `harden-audit`.
+
+## Testes
 
 ```bash
-sudo .venv/bin/python harden.py harden-advanced
+pip install -e .
+python -m unittest discover -s tests -p "test_*.py" -v
 ```
 
-O que faz:
+Inclui validação de chaves SSH, parser global do `sshd`, fail2ban, modprobe, `run_guarded` (códigos de saída), smoke do Typer e, em **Linux**, um smoke de integração leve (`tests/integration/`, leitura de `/etc/os-release`, `get_os_info`, `uname`).
 
-* Desativa serviços inseguros
-* Bloqueia módulos perigosos do kernel
-* Corrige permissões críticas
-* Ativa logging de sudo
+### CI (GitHub Actions)
 
----
+O workflow [`.github/workflows/ci.yml`](.github/workflows/ci.yml) corre em **ubuntu-latest** com Python 3.10, 3.11 e 3.12, instala o projeto com `pip install -e .` e executa o mesmo `unittest discover`. Assim a suíte corre **num SO Linux real** no push/PR (ramos `main` ou `master`).
 
-### 5. Auditoria e integridade
+### Aviso explícito — cobertura e confiança
 
-```bash
-sudo .venv/bin/python harden.py harden-audit
+> **Cobertura de testes** — não substitui pentest nem auditoria em produção. O CI executa testes automatizados em Linux, mas **não** são testes de integração ponta-a-ponta contra um servidor onde a ferramenta já tenha aplicado hardening com root (sem `sshd`/UFW/sudo alterados pela suite no pipeline).
+>
+> **“Seguro para usar” depende do uso** — em VM/snapshot, homologação e Ubuntu/Debian com backup e consola, é **razoavelmente confiável** para um projeto deste tipo. Em **produção crítica** sem janela de manutenção e sem plano B, **nunca** é “garantido”.
+
+Detalhe adicional:
+
+* Mesmo com CI em Linux, os testes continuam a ser sobretudo **unitários e smoke**; **processo** (staging, backups, consola, reversão) continua necessário para confiança operacional.
+* Integração pesada (ex.: VM descartável que executa `harden-*` de ponta a ponta) pode ser acrescentada à parte, se a sua organização exigir esse nível.
+
+## Uso recomendado (além do aviso acima)
+
+* Preferir **VM com snapshot**, **homologação** e só depois produção.
+* Garantir **backup**, **acesso à consola** (ou IPMI / cloud) e **janela de manutenção** quando aplicável.
+* **Produção crítica:** não tratar o resultado como garantido; validar sempre num ambiente parecido antes.
+
+## Limitações conhecidas
+
+* `Include` em `sshd_config` não é expandido: portas e edição global não “enxergam” ficheiros incluídos.
+* Derivados (ex.: Linux Mint) com `ID` diferente de `ubuntu`/`debian` precisam de `--skip-distro-check` ou extensão da lista em `app/core/constants.py`.
+* WSL pode limitar serviços e firewall.
+
+## Estrutura
+
 ```
-
-O que faz:
-
-* Instala e ativa auditd
-* Instala e executa rkhunter
-* Instala AIDE
-* Inicializa base de integridade (com fallback seguro)
-
----
-
-## Ordem Recomendada de Execução
-
-Para evitar problemas:
-
-1. harden-ssh
-2. harden-network
-3. harden-system
-4. harden-advanced
-5. harden-audit
-
----
-
-## Como o Sistema Funciona
-
-Fluxo de execução:
-
-1. CLI recebe comando
-2. Módulo correspondente é chamado
-3. Sistema executa comandos Linux via subprocess
-4. Configurações são aplicadas
-5. Validação é feita (quando necessário)
-6. Backups são gerados automaticamente
-
----
-
-## Segurança
-
-A ferramenta implementa:
-
-* Proteção contra perda de acesso SSH
-* Firewall com política restritiva
-* Bloqueio de brute force
-* Atualizações automáticas
-* Hardening de permissões
-* Auditoria de sistema
-* Detecção de rootkits
-* Verificação de integridade de arquivos
-
----
-
-## Observações Importantes
-
-* O projeto é otimizado para Ubuntu/Debian
-* Algumas ferramentas podem demorar (ex: AIDE)
-* WSL pode apresentar limitações
-* Sempre valide acesso SSH antes de aplicar mudanças
-
----
-
-## Tratamento de Erros
-
-* Timeout controlado para comandos longos
-* Erros não críticos não interrompem execução
-* Validação antes de aplicar mudanças críticas
-* Execução resiliente para ambiente real
-
----
-
-## Limitações Atuais
-
-* Suporte limitado a outras distribuições
-* Não possui execução remota (multi-host)
-* Não possui interface gráfica
-* Não possui sistema de rollback completo
-
----
-
-## Possíveis Evoluções
-
-* Execução em múltiplos servidores
-* Suporte multi-distro
-* Interface web
-* Relatórios de segurança
-* Perfis de hardening
-
----
-
-## Conclusão
-
-Hardening Suite automatiza tarefas críticas de segurança em Linux, reduzindo erros humanos e aplicando boas práticas de forma estruturada.
-
-O projeto demonstra conceitos de:
-
-* automação de infraestrutura
-* segurança de sistemas
-* organização modular
-* execução segura de comando
-
-
-0da48f5 (Projeto Hardening)
+app/
+├── cli/            CLI e tratamento de erros
+├── core/
+├── collectors/
+├── policies/
+├── remediators/
+├── utils/
+├── validators/
+tests/              Testes unittest
+state/backups/      Backups gerados em execução
+```

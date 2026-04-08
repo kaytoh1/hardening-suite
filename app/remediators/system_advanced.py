@@ -1,8 +1,13 @@
+from __future__ import annotations
+
+import os
+import re
+from pathlib import Path
+
 from app.utils.shell import run_command
 
-
 # =========================
-# 🚫 DESABILITAR SERVIÇOS PERIGOSOS
+# Desabilitar serviços desnecessários
 # =========================
 
 DANGEROUS_SERVICES = [
@@ -11,25 +16,52 @@ DANGEROUS_SERVICES = [
     "rlogin",
     "rexec",
     "avahi-daemon",
-    "cups",  # impressora (geralmente desnecessário em servidor)
+    "cups",
 ]
 
+_MODPROBE_LINE = re.compile(r"^install\s+([a-zA-Z0-9_-]+)\s+/bin/true\s*$")
+_MODULE_NAME = re.compile(r"^[a-zA-Z0-9_-]+$")
 
-def disable_unnecessary_services():
-    print("[INFO] Disabling unnecessary services...")
+MODPROBE_HARDENING = Path("/etc/modprobe.d/hardening.conf")
+SUDO_DROPIN = Path("/etc/sudoers.d/99-hardening-suite")
+
+SUDO_DROPIN_CONTENT = """# Gerenciado por hardening-suite — não editar manualmente sem visudo
+Defaults use_pty
+Defaults logfile="/var/log/sudo.log"
+"""
+
+
+def disable_unnecessary_services() -> None:
+    print("[INFO] Desabilitando serviços desnecessários...")
 
     for service in DANGEROUS_SERVICES:
-        run_command(["systemctl", "disable", "--now", service])
+        run_command(["systemctl", "disable", "--now", service], check=False)
 
-    print("[OK] Unnecessary services disabled")
+    print("[OK] Serviços desnecessários processados")
 
 
-# =========================
-# 🔒 BLOQUEAR KERNEL MODULES PERIGOSOS
-# =========================
+def _ensure_modprobe_install_line(module: str) -> None:
+    if not _MODULE_NAME.fullmatch(module):
+        raise ValueError(f"Nome de módulo inválido: {module!r}")
 
-def blacklist_kernel_modules():
-    print("[INFO] Blacklisting dangerous kernel modules...")
+    line = f"install {module} /bin/true\n"
+    MODPROBE_HARDENING.parent.mkdir(parents=True, exist_ok=True)
+
+    if MODPROBE_HARDENING.is_file():
+        current = MODPROBE_HARDENING.read_text(encoding="utf-8")
+        if line in current:
+            return
+        for existing in current.splitlines():
+            m = _MODPROBE_LINE.match(existing.strip())
+            if m and m.group(1) == module:
+                return
+
+    with MODPROBE_HARDENING.open("a", encoding="utf-8") as f:
+        f.write(line)
+
+
+def blacklist_kernel_modules() -> None:
+    print("[INFO] Bloqueando módulos de kernel (modprobe)...")
 
     modules = [
         "cramfs",
@@ -39,24 +71,17 @@ def blacklist_kernel_modules():
         "hfsplus",
         "squashfs",
         "udf",
-        "usb-storage"
+        "usb-storage",
     ]
 
     for module in modules:
-        run_command([
-            "bash", "-c",
-            f"echo 'install {module} /bin/true' >> /etc/modprobe.d/hardening.conf"
-        ])
+        _ensure_modprobe_install_line(module)
 
-    print("[OK] Kernel modules blacklisted")
+    print("[OK] Módulos adicionados ao blacklist (sem shell)")
 
 
-# =========================
-# 🔐 HARDENING DE PERMISSÕES
-# =========================
-
-def fix_permissions():
-    print("[INFO] Fixing critical permissions...")
+def fix_permissions() -> None:
+    print("[INFO] Ajustando permissões críticas...")
 
     commands = [
         ["chmod", "600", "/etc/shadow"],
@@ -66,36 +91,38 @@ def fix_permissions():
     ]
 
     for cmd in commands:
-        run_command(cmd)
+        run_command(cmd, check=True)
 
-    print("[OK] Permissions hardened")
-
-
-# =========================
-# 🚫 HARDENING DE ROOT / SUDO
-# =========================
-
-def harden_sudo():
-    print("[INFO] Hardening sudo configuration...")
-
-    run_command([
-        "bash", "-c",
-        "echo 'Defaults use_pty' >> /etc/sudoers"
-    ])
-
-    run_command([
-        "bash", "-c",
-        "echo 'Defaults logfile=\"/var/log/sudo.log\"' >> /etc/sudoers"
-    ])
-
-    print("[OK] Sudo hardened")
+    print("[OK] Permissões ajustadas")
 
 
-# =========================
-# 🚀 EXECUÇÃO COMPLETA
-# =========================
+def harden_sudo() -> None:
+    print("[INFO] Endurecendo sudo via /etc/sudoers.d/...")
 
-def harden_system_advanced():
+    if SUDO_DROPIN.is_file():
+        existing = SUDO_DROPIN.read_text(encoding="utf-8")
+        if existing.strip() == SUDO_DROPIN_CONTENT.strip():
+            print("[OK] Drop-in sudo já aplicado")
+            return
+
+    SUDO_DROPIN.write_text(SUDO_DROPIN_CONTENT, encoding="utf-8")
+    os.chmod(SUDO_DROPIN, 0o440)
+    os.chown(SUDO_DROPIN, 0, 0)
+
+    check = run_command(["visudo", "-cf", str(SUDO_DROPIN)], check=False)
+    if check.returncode != 0:
+        try:
+            SUDO_DROPIN.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise RuntimeError(
+            f"visudo rejeitou o drop-in: {check.stderr or check.stdout}"
+        )
+
+    print("[OK] Sudo endurecido (drop-in validado por visudo)")
+
+
+def harden_system_advanced() -> None:
     disable_unnecessary_services()
     blacklist_kernel_modules()
     fix_permissions()

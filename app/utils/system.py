@@ -1,8 +1,19 @@
 import platform
 from pathlib import Path
 
+from app.core.constants import SUPPORTED_DISTROS
 from app.core.exceptions import UnsupportedSystemError
 from app.core.models import OSInfo
+
+
+def assert_supported_distro() -> None:
+    """Garante Ubuntu/Debian antes de remediações destrutivas."""
+    info = get_os_info()
+    if info.distro not in SUPPORTED_DISTROS:
+        raise UnsupportedSystemError(
+            f"Distribuição '{info.distro}' não suportada. "
+            "Suportadas: Ubuntu e Debian. Use --skip-distro-check para forçar (não recomendado)."
+        )
 
 
 def get_os_info() -> OSInfo:

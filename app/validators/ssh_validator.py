@@ -1,34 +1,66 @@
+from __future__ import annotations
+
+import os
+from pathlib import Path
+
 from app.core.exceptions import ValidationError
 from app.utils.shell import run_command
+from app.utils.user_context import get_effective_user
 
 
 def validate_sshd_config() -> None:
     result = run_command(["sshd", "-t"])
 
     if result.returncode != 0:
-        raise ValidationError(f"Invalid SSH configuration:\n{result.stderr}")
+        raise ValidationError(f"Configuração SSH inválida:\n{result.stderr}")
 
 
-from pathlib import Path
-import os
-
-from app.utils.shell import run_command
+def _discover_private_key_paths(ssh_dir: Path) -> list[Path]:
+    candidates = [
+        ssh_dir / "id_ed25519",
+        ssh_dir / "id_ecdsa",
+        ssh_dir / "id_rsa",
+    ]
+    return [p for p in candidates if p.is_file()]
 
 
 def test_ssh_connection() -> bool:
-    user = os.environ.get("SUDO_USER") or os.environ.get("USER")
+    """
+    Testa login em localhost com BatchMode (sem prompt).
+    Tenta chaves privadas comuns no ~/.ssh do usuário efetivo.
+    """
+    try:
+        user, home = get_effective_user()
+    except ValidationError:
+        return False
 
-    key_path = Path("/home") / user / ".ssh/id_ed25519"
+    ssh_dir = home / ".ssh"
+    keys = _discover_private_key_paths(ssh_dir)
+    if not keys:
+        return False
 
-    result = run_command(
-        [
-            "ssh",
-            "-o", "BatchMode=yes",
-            "-o", "StrictHostKeyChecking=no",
-            "-i", str(key_path),
-            f"{user}@localhost",
-            "echo", "ok"
-        ]
-    )
+    env = os.environ.copy()
+    env.pop("SSH_AUTH_SOCK", None)
 
-    return result.returncode == 0 and result.stdout.strip() == "ok"
+    for key_path in keys:
+        result = run_command(
+            [
+                "ssh",
+                "-o",
+                "BatchMode=yes",
+                "-o",
+                "StrictHostKeyChecking=accept-new",
+                "-o",
+                "UserKnownHostsFile=" + str(ssh_dir / "known_hosts"),
+                "-i",
+                str(key_path),
+                f"{user}@127.0.0.1",
+                "echo",
+                "ok",
+            ],
+            env=env,
+        )
+        if result.returncode == 0 and result.stdout.strip() == "ok":
+            return True
+
+    return False
